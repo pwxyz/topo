@@ -4,13 +4,16 @@ import React from 'react'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 
 import * as THREE from 'three';
-import { get, flatten } from 'lodash'
+import { get, flatten, last } from 'lodash'
 import { initCameraPosition, initCameraLookAt, initLineColor, planInitCameraPosition, initSpriteColor, hoverSpriteColor } from './constants'
 
 import img from './instance.png'
 
 import polygon from './../../utils/polygon';
 import { Form, Input, Button } from 'antd'
+
+
+const initName = 'root'
 
 
 const getRandomStr = () =>
@@ -34,7 +37,7 @@ class Topo extends React.Component {
     totalNum: 1,
     maxNum: 350,
     side: 300,
-    height: 500,
+    height: 300,
     hoverSprite: false,
     selectSpriteUserData: {}
   }
@@ -43,7 +46,7 @@ class Topo extends React.Component {
     this.threeInit(this.getWidthAndHeight())
 
     window.addEventListener('mousemove', this.mouseMove);
-
+    window.scene = this.scene
   }
 
   componentWillUnmount() {
@@ -62,7 +65,7 @@ class Topo extends React.Component {
   }
 
   setLine = (firstArr, lastArr) => {
-    let material = new THREE.LineBasicMaterial({ color: initLineColor });
+    let material = new THREE.LineBasicMaterial({ color: initLineColor, side: THREE.DoubleSide });
     let geometry = new THREE.Geometry();
     geometry.vertices.push(new THREE.Vector3(...firstArr))
     geometry.vertices.push(new THREE.Vector3(...lastArr))
@@ -91,19 +94,107 @@ class Topo extends React.Component {
     return [get(position, '0'), get(position, '1'), z]
   }
 
-  getSpriteObj = (position = [0, 0, 0]) => {
+
+  getPrents = () => {
+    let arr = [...get(this.state.selectSpriteUserData, 'userData.parents', []), get(this.state.selectSpriteUserData, 'userData.id')].filter(i => i)
+    if (!arr.length) {
+      return [initName]
+    }
+
+    else return arr
+  }
+
+  resetSprite = () => {
+    let parents = get(this.state.selectSpriteUserData, 'userData.parents', [])
+
+    let arr = this.scene.children.filter(i => parents.includes(get(i, 'name')))
+
+    //用于储存更新后ratio的值
+    let ratioObj = {}
+
+
+    //按父级长度排序  优先计算低层级的数据
+    arr.sort((a, b) => parents.findIndex(i => get(a, 'name') === i) - parents.findIndex(i => get(b, 'name') === i))
+
+    for (let i = 0; i < arr.length; i++) {
+
+      //移除需要重置组中的线
+      let lineArr = get(arr, `${i}.children`).filter(i => get(i, 'type') === 'Line')
+      // lineArr.forEach(j => get(arr, i).remove(j))
+      console.log(lineArr)
+      get(arr, i).remove(...lineArr)
+
+      // let ratio = (get(arr, `${i}.userData.maxR`) + get(arr, `${i}.userData.side`)) / get(arr, `${i}.userData.side`)
+
+      let ratio = get(arr, `${i}.userData.ratio`, 2)
+
+      let initRatio = (get(arr, `${i}.userData.maxR`) + get(arr, `${i}.userData.side`)) / get(arr, `${i}.userData.side`, 1)
+
+      //找出子group倍数
+      // let childGroupRatio = get(arr, `${i + 1}.userData.ratio`, 1)
+      let childGroupRatio = get(ratioObj, get(arr, `${i}.name`), get(arr, `${i + 1}.userData.ratio`, 1))
+      let newRatio = childGroupRatio * initRatio
+      ratio = newRatio > ratio ? newRatio : ratio
+      console.log(arr, ratio, parents)
+      get(arr, `${i}`).userData = {
+        ...get(arr, `${i}.userData`, {}),
+        ratio
+      }
+      ratioObj[get(arr, `${i}.name`)] = ratio
+      console.log(ratio, newRatio, get(arr, i), { ratioObj })
+      let childLen = get(arr, `${i}.children.length`)
+      for (let j = 0; j < childLen; j++) {
+        let position = get(arr, `${i}.children.${j}.userData.position`, [0, 0, 0])
+        // let newPositon = this.getFinalPosition(position).map((k, index) => {
+        //   if (index === 2) {
+        //     return k
+        //   }
+        //   else return k * ratio
+        // })
+
+
+
+        let newPositon = position.map((k, index) => {
+          if (index === 2) {
+            return k
+          }
+          else return k * ratio
+          // return k * ratio
+        })
+
+        // console.log(newPositon, ratio, position, get(arr, `${i}.children.${j}`))
+        get(arr, `${i}.children.${j}`).position.set(...newPositon)
+
+
+
+        //重新绘制线
+        let line = this.getLineObj([0, 0, 0], newPositon)
+        get(arr, i).add(line)
+      }
+    }
+    console.log(ratioObj)
+  }
+
+  getSpriteObj = (position = [0, 0, 0], arg = {}) => {
     let spriteMap = new THREE.TextureLoader().load(img);
     let spriteMaterial = new THREE.SpriteMaterial({
       map: spriteMap,
       color: 0xffffff,
+      side: THREE.DoubleSide
     })
     let sprite = new THREE.Sprite(spriteMaterial);
     sprite.scale.set(50, 50, 1);
-    sprite.position.set(...this.getFinalPosition(position)
+    let finalPostion = this.getFinalPosition(position)
+    sprite.position.set(...finalPostion
     );
+    let id = getRandomStr()
+    sprite.name = id
     sprite.userData = {
-      id: getRandomStr(),
-      parents: [...get(this.state.selectSpriteUserData, 'userData.parents', []), get(this.state.selectSpriteUserData, 'userData.id')].filter(i => i)
+      id,
+      // parents: [...get(this.state.selectSpriteUserData, 'userData.parents', []), get(this.state.selectSpriteUserData, 'userData.id')].filter(i => i),
+      parents: this.getPrents(),
+      position: finalPostion,
+      ...arg
     }
     // this.scene.add(sprite)
     return sprite
@@ -147,10 +238,12 @@ class Topo extends React.Component {
     let startAngle = get(obj, 'startAngle', this.state.startAngle)
     let side = get(obj, 'side', this.state.side)
     let arr = []
-    arr = num.map(i => get(polygon({ num: i, startAngle, side }), 'data'))
-    console.log(arr)
-    arr = flatten(arr)
-    return arr
+    // arr = num.map(i => get(polygon({ num: i, startAngle, side }), 'data'))
+    let x = num.map(i => polygon({ num: i, startAngle, side }))
+
+    return flatten(x)
+    // arr = flatten(arr)
+    // return arr
   }
 
   toggle = () => {
@@ -159,23 +252,54 @@ class Topo extends React.Component {
 
   removeSomeSprite = () => {
     let id = get(this.state.selectSpriteUserData, 'userData.id')
-    console.log(id)
+
     if (id) {
-      let arrs = this.scene.children.filter(i => {
-        let parents = get(i, 'userData.parents', [])
-        return parents.includes(id)
-      })
+      // let arrs = this.scene.children.filter(i => {
+      //   let parents = get(i, 'userData.parents', [])
+      //   return parents.includes(id)
+      // })
+      // for (let i = 0; i < arrs.length; i++) {
+      //   this.scene.remove(arrs[i])
+      // }
+      console.log(id)
+      let arrs = this.scene.children.filter(i => get(i, 'name') === id)
       for (let i = 0; i < arrs.length; i++) {
         this.scene.remove(arrs[i])
       }
     }
-    else {
-      let arrs = this.scene.children
-      console.log(arrs)
-      for (let i = 0; i < arrs.length; i++) {
-        this.scene.remove(arrs[i])
+    // else {
+    //   let arrs = this.scene.children
+
+    //   for (let i = 0; i < arrs.length; i++) {
+    //     this.scene.remove(arrs[i])
+    //   }
+    // }
+  }
+
+  // addGroupLine = (startPoint, endPoint) => this.getLineObj(startPoint, endPoint)
+
+  getLineObj = (startPoint, endPoint) => {
+    let material = new THREE.LineBasicMaterial({ color: initLineColor });
+    let geometry = new THREE.Geometry();
+    geometry.vertices.push(new THREE.Vector3(...startPoint))
+    geometry.vertices.push(new THREE.Vector3(...endPoint))
+    let line = new THREE.Line(geometry, material);
+    return line
+  }
+
+  getParent = () => {
+    let parents = get(this.state.selectSpriteUserData, 'userData.parents', [])
+    let arg = this.scene
+
+    for (let i = 0; i < parents.length; i++) {
+      let newArg = arg.children.find(j => get(j, 'name') === parents[i])
+      console.log({ newArg })
+      if (newArg) {
+        arg = newArg
       }
     }
+    console.log(parents, arg)
+    return arg
   }
 
   renderImg = (arr) => {
@@ -186,21 +310,48 @@ class Topo extends React.Component {
     // for (let i = 0; i < arrs.length; i++) {
     //   this.scene.remove(arrs[i])
     // }
+
+
     this.removeSomeSprite()
+    this.resetSprite()
     let group = new THREE.Group()
     let selectSpriteUserData = this.state.selectSpriteUserData
     if ('userData' in selectSpriteUserData) {
       group.parent = selectSpriteUserData
       group.position.set(get(selectSpriteUserData, 'position.x'), get(selectSpriteUserData, 'position.y'), get(selectSpriteUserData, 'position.z'))
     }
-    group.name = get(selectSpriteUserData, 'userData.id', 'root')
+
+    group.name = get(selectSpriteUserData, 'userData.id', initName)
+    let maxR = 0
+    let arg = {}
     for (let i = 0; i < arr.length; i++) {
-      let item = this.getSpriteObj(arr[i])
+      let itemArr = get(arr[i], 'data')
+      maxR = get(arr[i], 'maxR') > maxR ? get(arr[i], 'maxR') : maxR
+      arg = arr[i]
+      itemArr?.forEach(j => {
+        let item = this.getSpriteObj(j, arr[i])
+        if (get(selectSpriteUserData, 'userData.id')) {
+          let line = this.getLineObj([0, 0, 0], this.getFinalPosition(j))
+          group.add(line)
+        }
+
+        group.add(item)
+      })
+      // let item = this.getSpriteObj(get(arr[i], 'data'))
       // array.push(item)
-      group.add(item)
+
+      // group.add(item)
 
     }
+
+    group.userData = {
+      parents: this.getPrents(),
+      ...arg,
+      maxR
+    }
+
     this.scene.add(group)
+    // this.getParent().add(group)
 
   }
 
@@ -238,15 +389,17 @@ class Topo extends React.Component {
     let arr = this.getSprite(e)
     if (arr.length) {
       // arr.forEach(i => this.changeSpriteColor(get(i, 'object'), 'hover'))
-      this.changeSpriteColor(get(arr, '0.object'), 'hover')
-      this.setState({ selectSpriteUserData: get(arr, '0.object') })
-      console.log(get(arr, '0.object'))
+      let arg = get(last(arr), 'object')
+      this.changeSpriteColor(arg, 'hover')
+      this.setState({ selectSpriteUserData: arg })
+      // console.log(arg)
     }
     else {
       this.changeSpriteColor(this.state.selectSpriteUserData, 'common')
       this.setState({ selectSpriteUserData: {} })
 
     }
+
   }
 
   changeSpriteColor = (obj, state = 'common') => {
@@ -275,7 +428,7 @@ class Topo extends React.Component {
 
   render() {
     const { num, startAngle, side, maxNum, totalNum, hoverSprite, height } = this.state
-    console.log(this.scene)
+    // 
     return (
       <div>
         <div ref={e => this.dom = e} style={{ position: 'relative', width: '100vw', height: '100vh', cursor: hoverSprite ? 'pointer' : 'inherit' }}  >

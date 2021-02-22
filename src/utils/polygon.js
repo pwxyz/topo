@@ -6,24 +6,29 @@
 * 返回 { data: 坐标参数, maxR: 最大半径 }
 */
 const polygon = ({ num, startAngle = 0, side = 30 }) => {
+  let arr = []
+  let maxR = 0
+
   if (num === 0) {
-    return []
+    arr = []
   }
   if (num === 1) {
-    return [[0, 0, 0]]
+    arr = [[0, 0, 0]]
   }
-  let arr = []
-  let perDeg = 360 / num
-  let maxR = 0
-  for (let i = 0; i < num; i++) {
-    let sin = getFloorNum(Math.sin(perDeg * Math.PI / 180), 15)
-    sin = sin === 0 ? 1 : sin
-    let r = (side / 2) / sin
-    if (r > maxR) {
-      maxR = r
+  else {
+
+    let perDeg = 360 / num
+
+    for (let i = 0; i < num; i++) {
+      let sin = getFloorNum(Math.sin(perDeg * Math.PI / 180), 15)
+      sin = sin === 0 ? 1 : sin
+      let r = (side / 2) / sin
+      if (r > maxR) {
+        maxR = r
+      }
+      let coordinate = getCoordnate(i * perDeg + startAngle, r)
+      arr.push(coordinate)
     }
-    let coordinate = getCoordnate(i * perDeg + startAngle, r)
-    arr.push(coordinate)
   }
   return { data: arr, maxR, side }
 }
